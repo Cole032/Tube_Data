@@ -1,7 +1,7 @@
 import pyvisa as visa  # This is python package that controls the usb communications
-import numpy as np # This package will allow you to build arrays of data points 
-import time # This is sometimes necessary to pause the code to allow a command to complete on one of the instruments.
-import matplotlib.pyplot as plt # This allows you to plot data on graphs
+import numpy as np 
+import time    # This is sometimes necessary to pause the code to allow a command to complete on one of the instruments.
+import matplotlib.pyplot as plt
 from scale_scope import *
 from scipy.fft import fft, ifft, fftfreq
 import do_spec_2
