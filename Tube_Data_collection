@@ -1,0 +1,224 @@
+import pyvisa as visa  # This is python package that controls the usb communications
+import numpy as np # This package will allow you to build arrays of data points 
+import time # This is sometimes necessary to pause the code to allow a command to complete on one of the instruments.
+import matplotlib.pyplot as plt # This allows you to plot data on graphs
+from scale_scope import *
+from scipy.fft import fft, ifft, fftfreq
+import do_spec_2
+#import Transfer_Function_Code as TFC
+
+
+from os.path import exists # use this to protect from overwriting an existing data file.
+import datetime # use to create unique data file names
+
+# this is the full path to the data directory, it is not stored in the Github directory as there will be large
+# amounts going forward which should not be uploaded to Github
+fpath = "/home/research/Desktop/NewScope/Tube_Data/"
+# filename for the data file to be recorded. it should folow this format: mo_da_year_starttime.dat
+td = datetime.date.today()
+ts = datetime.datetime.now()
+
+#"whotheplugbelongsto-Areaofporosity-numberofpores-airbackingringheight(cm)-microphoneorder
+fname = "DrFreds-A50-900-2-BA" #AB=channel #1 microphone is on top and channel 2 is on bottom
+path_to_file_dat = fpath + fname + ".dat"
+file_exists = exists(path_to_file_dat)
+if file_exists:
+    print("old file exists, rename output file")
+else:
+    print(path_to_file_dat)
+fdat = open(path_to_file_dat, "w")
+print("Data file is: "+path_to_file_dat)
+path_to_file = fpath + fname + ".info"
+finfo = open(path_to_file, "w")
+print("Info file is: "+path_to_file)
+#path_to_file = fpath + fname + ".freq"
+#ffreq = open(path_to_file,"w")
+print("file open for writing")
+finfo.write(str(td.year)+"-"+str(td.month)+"-"+str(td.day)+"\n") #Date of measurement
+finfo.write("Cole\n") # responsible person
+finfo.write("RIGOL DS1054Z\n") # Scope used
+finfo.write("RIGOL DG1022Z\n") # Function Generator used
+finfo.write("Yes\n") # Amplifier used yes or no
+finfo.write("1, 0\n") # Amplifier settings channel A (if not used pu NA)
+finfo.write("Sample A50-900\n") # porous sample used (see list of disks)
+finfo.write("2.0 cm\n") # Air backing thickness (in cm)
+finfo.write("2.75 cm\n") # Microphone A location (in cm, relative to sample surface)
+finfo.write("11.0 cm\n") # Microphone B location (in cm, relative to sample surface)
+df = 10.0 # Measurement frequency step size in Hz
+finfo.write(str(df) + " Hz\n") # frequency step used in data run
+fmin = 100 # Hz
+finfo.write(str(fmin) + " Hz\n") # Minimum Frequency
+fmax = 2000.0 # Hz
+finfo.write(str(fmax) + " Hz\n") # Maximum Frequency
+finfo.close()
+
+
+
+# This cell will initialize the control of the usb ports and indentify any scopes or function generators that
+# are attached.
+
+rm = visa.ResourceManager('@py') #use pyvisa as the backend and define a resource manager
+instruments = rm.list_resources() # get a list of instrument attached to the usb ports
+
+# print out all of the instruments attached
+print('A list of all instruments attached to the USB ports')
+print(instruments)
+print(' ')
+
+# filter this list for Rigol scopes
+Rigol_scopes = list(filter(lambda x: 'DS1' in x or 'HDO1' in x, instruments)) 
+
+# filter this list for Rigol funtion generators
+Rigol_funcgen = list(filter(lambda x: 'DG1' in x, instruments)) 
+
+# print out the list of Rigol scopes
+print('A list of the Rigol scopes attached to the USB ports')
+print(Rigol_scopes)
+print(np.shape(Rigol_scopes)[0])
+
+# print out the list of Rigol funtion generators
+print('A list of the Rigol function generators attached to the USB ports')
+print(Rigol_funcgen)
+
+
+#__________________________________________________________________________________________________________________
+# This cell will initialize the scopes and function generators so that we can pass commands and receive data back 
+# from them. Each instrument is initially set to its factory settings as a precaution. We will later put in the 
+# specific settings that we want to use for our measurements. By starting from the factory settings, we can be 
+# sure that there are no settings left over from a previous user.
+
+print("The number of scopes is: ", np.shape(Rigol_scopes)[0])
+print("The number of fucntion generators is: ", np.shape(Rigol_funcgen)[0])
+
+myscopes = [] # allow from more than 1 scope to be controlled
+# Initialize the scope
+for i in range(np.shape(Rigol_scopes)[0]):
+    myscopes.append(rm.open_resource(Rigol_scopes[i], timeout=100000, chunk_size=1024000))
+    myscopes[i].write(":*RST") # This is the command to set the instrument to factory default settings
+    print("scope ", i, " found")
+
+# select the scope to use for data acquisition
+scope = myscopes[0]
+
+# Initialize the fucntion generator
+for i in range(np.shape(Rigol_funcgen)[0]):
+    funcgen = rm.open_resource(Rigol_funcgen[i], timeout=100000, chunk_size=1024000)
+    funcgen.write(":*RST") # This is the command to set the instrument to factory default settings
+    print("function generator found")
+
+# give each instrument some time to reset before you go in and start changing parameters
+time.sleep(5) # Wait 5 seconds to continue
+
+
+
+_____________________________________________________________________________________________________________
+# This cell will set the scope up to make the measurements that we are interested in. It will set the channel
+# we are looking at as well as the timebase and scale of the channel.
+
+# We need to use both channels 1 and 2. 
+
+# Channel 1 will connect to mic 1:
+scope.write(":CHAN1:DISP ON") # Turn off the display of channel 1
+scope.write(":CHAN1:PROB 1") # Set the probe to a x1 probe
+scope.write(":CHAN1:COUP AC") # set the couplong on channel 1 to DC
+scope.write(":CHAN1:SCAL 0.2") #Set the scale to 0.2 V per division (square)
+
+# Channel 2 will be the trigger channel:
+scope.write(":CHAN2:DISP ON") # Turn off the display of channel 1
+scope.write(":CHAN2:PROB 1") # Set the probe to a x1 probe
+scope.write(":CHAN2:COUP AC") # Set the coupling on channel 2 to DC
+scope.write(":CHAN2:SCAL 2.0") # Set the scale to 2.0 V per division (square)
+
+"""
+    Need to revamp the process for collecting data as there are only 2 channels. Should be able
+    to bring a trigger signal into the back to control phase for the recorded signals. Currently
+    the only TRIG command that is valid is the sweep command. 
+"""
+
+
+# Channel 3 will connect to mic 2:
+scope.write(":CHAN3:DISP ON") # Turn off the display of channel 1
+scope.write(":CHAN3:PROB 1") # Set the probe to a x1 probe
+scope.write(":CHAN3:COUP AC") # Set the coupling on channel 2 to DC
+scope.write(":CHAN3:SCAL 0.2") # Set the scale to 0.2 V per division (square)
+
+# Set the specifics for triggering a measurement
+scope.write(":TRIG:EDG:SOUR CHAN2") # The measurement will use the signal coming in on channel 2 to trigger the scope
+scope.write(":TRIG:EDG:LEV 0.1") # A measurement is triggered when the signal hits 0.1 V
+scope.write(":TRIG:SWE NORM") # set the sweep to normal so the image is stable
+
+# Set the horizontal scale for the measurement
+""" 
+    Setting the timebase on the scope to 20 ms gives a RAW sample rate of 125 MHz. 
+    This allows for the entire signal to be seen on the screen of the scope. Only 
+    1200 of the 3 million data points are displayed on the screen. When downloaded
+    in the RAW state you will receive a large number of points in between the ones 
+    shown on the screen allowing for much higher frequency resolution in the 
+    spectrum. Using this setting allows easy acces to spectra with 10 Hz resolution.
+"""
+scope.write(":TIM:MAIN:SCAL 0.02") # the timebase will use 20 ms/division
+
+#set the number of signals to average in the measurement
+#scope.write(":ACQ:TYPE AVER")
+scope.write(":ACQ:AVER 1")
+scope.write(":RUN")
+
+_________________________________________________________________________________________
+"""
+    Use f_sour as an initial source frequency. This is used to verify the communication with
+    fucntion generator.
+    
+    The function set_sour_f will set both channels on the function generator to supply a 
+    900 Hz sine wave and then turn both outputs on. It will also make sure that the scope
+    is in RUN mode and collecting data.
+"""
+f_sour = 900
+#init = True # This is the initial setup of the function generator
+do_spec_2.set_sour_f(scope,funcgen,f_sour, True)
+time.sleep(5)
+
+_____________________________________________________________________________________________
+
+## This cell will read in the scope setup for data collection
+
+"""scope.write(":STOP") # stop the scope
+scope.write(":WAV:SOUR CHAN1") # set channel 1 as the source for data
+scope.write(":WAV:MODE RAW") # use the raw data type to pull from internal memory
+scope.write(":WAV:FORM ASC") # access the data in ascii format
+
+# Read the preamble for the data download, to set physical parameters.
+scope.write(":WAV:PRE?")
+pream_dat = scope.read()
+pream_dat = pream_dat.strip()
+pream_dat = pream_dat.split(',')
+float_pream_dat = [float(item) for item in pream_dat]
+"""
+
+float_pream_dat = do_spec_2.getpream(scope)
+
+# Determine the Nyquist freqency for this measurement.
+f_samp = 1/float_pream_dat[4] # Calculate the sampling frequency from dt
+f_ny = f_samp/2 # The nyquist f is 1/2 teh sampling f
+spec_res = 5.0 # The desired frequency resolution in Hz
+n = int(f_samp/spec_res) # Figure the number of points needed to get a particular f resolution
+
+print(f_samp, f_ny, spec_res, n)
+init = False # No need to do the initial setup of FG
+
+tb = 0.02 # timebase on the scope
+for f in range(int(fmin), int(fmax)+int(df), int(df)):
+    scope.write(":ACQ:TYPE NORM")
+    do_spec_2.set_sour_f(scope,funcgen,f,init)
+    vscale_scope(scope,"CHAN1",tb)
+    vscale_scope(scope,"CHAN3",tb)
+    #do_spec_2.setVscale(scope,funcgen)
+    #scope.write(":ACQ:TYPE AVER")
+    #scope.write(ACQ:TYPE:AVER")
+    scope.write(":RUN")
+    #time.sleep(18)
+    print("New frequency is ", f, " Hz")
+
+    fout = do_spec_2.f_spec(scope,[1,3],float_pream_dat[4],spec_res,f,n)
+    print(fout)
+    print(fout[0].real, "\t ", fout[0].imag, "\t", fout[1].real ,"\t", fout[1].imag, "\n")
+    fdat.write("%6.0f \t %5.2f \t %5.2f \t %5.2f \t %5.2f\n" %(f, fout[0].real,fout[0].imag, fout[1].real,fout[1].imag))
