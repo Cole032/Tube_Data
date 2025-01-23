@@ -1,0 +1,76 @@
+import numpy as np # This package will allow you to build arrays of data points 
+import time # This is sometimes necessary to pause the code to allow a command to complete on one of the instruments.
+import matplotlib.pyplot as plt # This allows you to plot data on graphs
+#import Transfer_Function_Code_Copy_2 as TFC
+import cmath as cm
+
+
+"""
+    This cell reads the data in from the file created earlier. The file format is
+    f Re(mic1) Im(mic1) Re(mic2) Im(mic2)
+    fdatx ==> f Re(mic1) Im(mic1) Re(mic2) Im(mic2)
+"""
+fpath = '/home/research/Desktop/NewScope/Tube_Data/'
+ffile = 'DrFreds-A50-900-2-AB.dat'
+path_to_file = fpath + ffile
+fdat1 = np.loadtxt(path_to_file, 'float', "r")
+
+fpath = '/home/research/Desktop/NewScope/Tube_Data/'
+ffile = 'DrFreds-A50-900-2-BA.dat'
+path_to_file = fpath + ffile
+fdat2 = np.loadtxt(path_to_file, 'float', "r")
+
+freq = fdat1[:,0]
+print(len(freq))
+print(freq)
+________________________________________________________________________________
+"""
+    This cell defines a function to divide two complex numbers
+"""
+
+def transfer_fucntion(Rtop,Itop,Rbot,Ibot):
+    Treal = []
+    Timag = []
+    for i in range(0,len(Rtop)):
+        denominator = Rbot[i]**2 + Ibot[i]**2
+        Treal.append((Rtop[i]*Rbot[i] + Itop[i]*Ibot[i])/denominator)
+        Timag.append((Rbot[i]*Itop[i] - Rtop[i]*Ibot[i])/denominator)
+        
+    return Treal, Timag
+
+_____________________________________________________________________________________________________
+Re_T_1 = []
+Im_T_1 = []
+Re_T_2 = []
+Im_T_2 = []
+
+#Re(MicA) = fdat1[i][1], Im(MicA) = fdat1[i][2], Re(MicB) = fdat1[i][3], Im(MicB) = fdat1[i][4]
+'''
+    Ti should have mic 1 on top and mic 2 on bottom
+    T2 should have mic 2 on top and mic 1 on bottom
+'''
+
+Re_T_1, Im_T_1 = transfer_fucntion(fdat1[:,1],fdat1[:,2],fdat1[:,3],fdat1[:,4],)
+Re_T_2, Im_T_2 = transfer_fucntion(fdat2[:,3],fdat2[:,4],fdat2[:,1],fdat2[:,2],)
+
+
+with open('Dr.Freds-A50%-900-2_transfer_1.dat', 'w') as t:
+    
+    DataOut = np.column_stack((freq, Re_T_1, Im_T_1))
+    
+    np.savetxt('Dr.Freds-A50%-900-2_transfer_1.dat', DataOut,header = "freq  Re(T_1)   Im(T_1)", fmt=('%i','%10.5f', '%10.5f'))
+
+with open('Dr.Freds-A50%-900-2_transfer_2.dat', 'w') as t:
+    
+    DataOut = np.column_stack((freq, Re_T_2, Im_T_2))
+    np.savetxt('Dr.Freds-A50%-900-2_transfer_2.dat', DataOut,header = "freq  Re(T_2)   Im(T_2)", fmt=('%i','%10.5f', '%10.5f'))
+
+___________________________________________________________________________________________________________________________________
+for i in range(0,(len(T_1))):
+    
+    c = ((float(T_1[i][1])*float(T_2[i][1]) - float(T_1[i][2])*float(T_2[i][2])) + 
+          (float(T_1[i][1])*float(T_2[i][2]) + float(T_1[i][2])*float(T_2[i][1]))*1j)
+    
+    T_function = cm.sqrt(c)
+    
+    print('T('+str(freq[i])+') = ', str(T_function))
